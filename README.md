@@ -37,6 +37,7 @@ minimalistic couchdb driver for node.js
   - [nano.updates([params], [callback])](#nanoupdatesparams-callback)
   - [nano.followUpdates([params], [callback])](#nanofollowupdatesparams-callback)
 - [document functions](#document-functions)
+  - [db.txn(id, [operation], [callback])](#dbtxnid-operation-callback)
   - [db.insert(doc, [params], [callback])](#dbinsertdoc-params-callback)
   - [db.destroy(docname, rev, [callback])](#dbdestroydocname-rev-callback)
   - [db.get(docname, [params], [callback])](#dbgetdocname-params-callback)
@@ -395,6 +396,78 @@ process.nextTick(function () {
 ```
 
 ## document functions
+
+### db.txn(id, [operation], [callback])
+
+Perform a document [transaction][txn]. Transactions are a flexible, robust way to create or modify documents. Instead of supplying the *data* to store in a document, you supply an *operation* (a JavaScript function), to perform on the document. Nano will handle fetching and storing the document, as well as re-trying in the case of a conflict.
+
+``` js
+db.txn("my-doc", setName, onUpdated);
+
+function setName(doc, toTxn) {
+  doc.name = "Matthew";
+  return toTxn();
+}
+
+function onUpdated(er, myDoc) {
+  if (er) {
+    console.log('Update failed: %s', er.message);
+  } else {
+    console.log('Successful update, name is now %s', myDoc.name);
+  }
+}
+```
+
+Notice, since the transaction API requires two functions, with the latter executing after the former, a common style is to employ [JavaScript hoisting][hoisting] to define the operation and then callback function *below* the call to `db.txn()`. That way, the *code reads* from top-to-bottom the same way that the *program executes*: first a call to `db.txn()`, then modifying the relevent document, and finally handling the result of that change.
+
+Transactions are more convenient, since Nano handles retries for you if there is a 409 conflict; and they are more reliable: changes to the same document work as expected.
+
+``` js
+// These updates will run concurrently.
+db.txn("Mark", incrementScore, onUpdated);
+db.txn("Mark", incrementScore, onUpdated);
+
+function incrementScore(doc, toTxn) {
+  var oldScore = doc.score || 0;
+  var newScore = oldScore + 1;
+  doc.score = newScore;
+
+  return toTxn();
+}
+
+function onUpdated(er, doc) {
+  console.log('Score is now: %s', doc.score);
+}
+```
+
+The output is just what you'd expect.
+
+    Score is now: 1
+    Score is now: 2
+
+Instead of a string `id`, you can provide an object with [options][txn-options]. These allow for more advanced control of the Transaction library. For example, to create a document if it does not already exist:
+
+``` js
+alice.txn({id:"my-doc", create:true}, addScore, scoreAdded);
+
+function addScore(doc, toTxn) {
+  doc.score = doc.score || 0;
+  doc.score += 1;
+  return toTxn();
+}
+
+function scoreAdded(er, doc) {
+  if (er) {
+    console.log('Failed to update document: %s', er.message)
+  } else {
+    console.log('Updated document %s; current score = %s', doc._id, doc.score);
+  }
+}
+```
+
+Please see the [Transaction][txn] documentation for comprehensive details of its features.
+
+[hoisting]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/var#var_hoisting
 
 ### db.insert(doc, [params], [callback])
 
@@ -861,6 +934,8 @@ where `list_doc_params` is the test name.
 [3]: http://caos.di.uminho.pt/
 [4]: https://github.com/dscape/nano/blob/master/cfg/couch.example.js
 [follow]: https://github.com/jhs/follow
+[txn]: https://github.com/jhs/txn
+[txn-options': https://github.com/jhs/txn#request_obj
 [request]:  https://github.com/mikeal/request
 
 ## license
